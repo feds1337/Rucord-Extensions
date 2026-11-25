@@ -1,0 +1,74 @@
+name: Validate and pin extension catalog
+
+on:
+  pull_request:
+    paths:
+      - "themes/**"
+      - "plugins/**"
+      - "sdk/**"
+      - "previews/**"
+      - "licenses/**"
+      - "catalog.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "test_catalog.py"
+      - ".github/workflows/catalog.yml"
+  push:
+    branches: [main]
+    paths:
+      - "themes/**"
+      - "plugins/**"
+      - "sdk/**"
+      - "previews/**"
+      - "licenses/**"
+      - "catalog.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "test_catalog.py"
+      - ".github/workflows/catalog.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Validate packages and manifests
+        run: |
+          python3 -m unittest test_catalog.py
+          python3 catalog.py --validate
+          cargo check --locked --workspace --target wasm32-unknown-unknown
+
+  pin-catalog:
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6.1.0
+        with:
+          python-version: "3.x"
+      - name: Pin packages to the merged commit
+        run: python3 catalog.py --pin "$GITHUB_SHA"
+      - name: Commit updated catalog
+        run: |
+          if git diff --quiet -- catalog.json; then
+            echo "Catalog already matches this commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog.json
+          git commit -m "chore(extensions): pin catalog to ${GITHUB_SHA:0:12}"
+          git push
